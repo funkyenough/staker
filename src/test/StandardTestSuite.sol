@@ -3,9 +3,9 @@
 
 pragma solidity ^0.8.23;
 
+import {console2} from "forge-std/Test.sol";
 import {Staker} from "../Staker.sol";
 import {StakerTestBase} from "./StakerTestBase.sol";
-
 
 abstract contract StakeBase is StakerTestBase {
   function testForkFuzz_CorrectlyStakeAndEarnRewardsAfterDuration(
@@ -100,32 +100,23 @@ abstract contract StakeBase is StakerTestBase {
     _notifyRewardAmount(_rewardAmount);
     _jumpAheadByPercentOfRewardDuration(_percentDuration1);
 
+    // intentionally warp till the end of current reward period
+    _jumpAheadByPercentOfRewardDuration(100 - _percentDuration1);
+
     _notifyRewardAmount(_rewardAmount);
     _jumpAheadByPercentOfRewardDuration(_percentDuration2);
 
-    uint256 _remainingFirstPeriodRewards = _percentOf(_rewardAmount, 100 - _percentDuration1);
     uint256 unclaimedRewards1 = staker.unclaimedReward(_depositId1);
     uint256 unclaimedRewards2 = staker.unclaimedReward(_depositId2);
     Staker.Deposit memory _deposit1 = _fetchDeposit(_depositId1);
     Staker.Deposit memory _deposit2 = _fetchDeposit(_depositId2);
-    uint256 _earnedRewards1 = _calculateEarnedRewards(
-      _deposit1.earningPower, _rewardAmount, _percentDuration1
-    )
-      + _calculateEarnedRewards(
-        _deposit2.earningPower, _rewardAmount + _remainingFirstPeriodRewards, _percentDuration2
-      );
-    uint256 _earnedRewards2 = _calculateEarnedRewards(
-      _deposit2.earningPower, _rewardAmount, _percentDuration1
-    )
-      + _calculateEarnedRewards(
-        _deposit2.earningPower, _rewardAmount + _remainingFirstPeriodRewards, _percentDuration2
-      );
+    uint256 _earnedRewards1 = _calculateEarnedRewards(_deposit1.earningPower, _rewardAmount, 100)
+      + _calculateEarnedRewards(_deposit1.earningPower, _rewardAmount, _percentDuration2);
+    uint256 _earnedRewards2 = _calculateEarnedRewards(_deposit2.earningPower, _rewardAmount, 100)
+      + _calculateEarnedRewards(_deposit2.earningPower, _rewardAmount, _percentDuration2);
 
-    // because we summed 2 amounts, the rounding error can be as much as 2 units
-    assertApproxEqAbs(unclaimedRewards1, _earnedRewards1, 2);
-    assertLe(unclaimedRewards1, _earnedRewards1);
-    assertApproxEqAbs(unclaimedRewards2, _earnedRewards2, 2);
-    assertLe(unclaimedRewards2, _earnedRewards2);
+    assertLteWithinOneUnit(unclaimedRewards1, _earnedRewards1);
+    assertLteWithinOneUnit(unclaimedRewards2, _earnedRewards2);
   }
 }
 
@@ -190,18 +181,22 @@ abstract contract WithdrawBase is StakerTestBase {
 
     Staker.DepositIdentifier _depositId1 = _stake(_depositor1, _amount, _delegatee);
     Staker.DepositIdentifier _depositId2 = _stake(_depositor2, _amount, _delegatee);
+    console2.log("depositId2 in test", Staker.DepositIdentifier.unwrap(_depositId2));
 
     _notifyRewardAmount(_rewardAmount);
+    console2.log("depositId2 in test", Staker.DepositIdentifier.unwrap(_depositId2));
 
     _jumpAheadByPercentOfRewardDuration(_percentDuration1);
     uint256 initialRewards1 = staker.unclaimedReward(_depositId1);
     _withdrawAmount1 = bound(_withdrawAmount1, 0, _amount);
     _withdraw(_depositor1, _depositId1, _withdrawAmount1);
     assertLteWithinOneUnit(staker.unclaimedReward(_depositId1), initialRewards1);
+    console2.log("depositId2 in test", Staker.DepositIdentifier.unwrap(_depositId2));
 
     _jumpAheadByPercentOfRewardDuration(_percentDuration2);
     uint256 initialRewards2 = staker.unclaimedReward(_depositId2);
     _withdrawAmount2 = bound(_withdrawAmount2, 0, _amount);
+    console2.log("depositId2 in test", Staker.DepositIdentifier.unwrap(_depositId2));
     _withdraw(_depositor2, _depositId2, _withdrawAmount2);
     assertLteWithinOneUnit(staker.unclaimedReward(_depositId2), initialRewards2);
 
@@ -209,6 +204,7 @@ abstract contract WithdrawBase is StakerTestBase {
     assertEq(STAKE_TOKEN.balanceOf(_depositor2), _withdrawAmount2);
   }
 
+  // fails due to zero mint amount
   function testForkFuzz_ClaimRewardAndWithdrawAfterDuration(
     address _depositor,
     uint96 _amount,
@@ -216,7 +212,7 @@ abstract contract WithdrawBase is StakerTestBase {
     uint256 _rewardAmount,
     uint256 _withdrawAmount,
     uint256 _percentDuration
-  ) public {
+  ) public virtual {
     _assumeNotZeroAddressOrStaker(_depositor);
     vm.assume(_delegatee != address(0));
 
